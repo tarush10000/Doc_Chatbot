@@ -1,7 +1,7 @@
 import sys
 import os
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QScrollBar,
-                            QLineEdit, QPushButton, QListWidget, QListWidgetItem, QLabel)
+                            QLineEdit, QPushButton, QListWidget, QListWidgetItem, QLabel, QTextEdit, QDialog)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QTextCursor
 from docx import Document
@@ -20,6 +20,55 @@ import pygame
 import asyncio
 import shutil
 import re
+
+class CollapsibleReferenceWidget(QWidget):
+    show_references_signal = pyqtSignal(str)
+
+    def __init__(self, references):
+        super().__init__()
+        self.references = references
+        self.is_collapsed = True
+        self.init_ui()
+
+
+    def init_ui(self):
+        self.layout = QVBoxLayout()
+
+        self.summary_label = QLabel(self.get_summary())
+        self.summary_label.setWordWrap(True)
+        self.summary_label.setStyleSheet("color: white;")
+
+        self.toggle_button = QPushButton("Show More")
+        self.toggle_button.setStyleSheet("background-color: #1E1E1E; color: #00A884; border: none;")
+        self.toggle_button.clicked.connect(self.show_references)
+
+        self.layout.addWidget(self.summary_label)
+        self.layout.addWidget(self.toggle_button)
+
+        self.setLayout(self.layout)
+
+    def get_summary(self):
+        return self.references.split('\n')[0]  # Display only the first line
+
+    def show_references(self):
+        self.show_references_signal.emit(self.references)
+
+class ReferencesPopup(QDialog):
+    def __init__(self, references):
+        super().__init__()
+        self.setWindowTitle("References")
+        self.setModal(True)
+
+        layout = QVBoxLayout()
+
+        references_text = QTextEdit()
+        references_text.setPlainText(references)
+        references_text.setReadOnly(True)
+
+        layout.addWidget(references_text)
+
+        self.setLayout(layout)
+
 
 class DocumentProcessor(QThread):
     finished = pyqtSignal(object)
@@ -345,7 +394,6 @@ class TextToSpeech(QThread):
         self.text = text
         self.is_playing = False
         self.temp_filename = ""
-        self.mixer_initialized = False
 
     def preprocess_text(self, text):
         # Remove emojis and asterisks
@@ -365,7 +413,6 @@ class TextToSpeech(QThread):
         
         try:
             pygame.mixer.init()
-            self.mixer_initialized = True
             pygame.mixer.music.load(self.temp_filename)
             pygame.mixer.music.play()
             self.is_playing = True
@@ -373,31 +420,25 @@ class TextToSpeech(QThread):
             while pygame.mixer.music.get_busy() and self.is_playing:
                 pygame.time.Clock().tick(10)
             
-            if self.mixer_initialized:
-                pygame.mixer.quit()
-                self.mixer_initialized = False
+            pygame.mixer.quit()
         except pygame.error as e:
             print(f"Error playing audio: {e}")
         finally:
             self.cleanup()
-        
         self.finished.emit()
 
     def stop(self):
         self.is_playing = False
-        if self.mixer_initialized:
-            try:
-                pygame.mixer.music.stop()
-            except pygame.error:
-                pass
+        # Handle pygame mixer within the same thread context
+        try:
+            pygame.mixer.music.stop()
+        except pygame.error:
+            pass
         self.cleanup()
 
     def cleanup(self):
         if self.temp_filename != "" and os.path.exists(self.temp_filename):
             try:
-                if self.mixer_initialized:
-                    pygame.mixer.quit()
-                    self.mixer_initialized = False
                 os.unlink(self.temp_filename)
             except PermissionError:
                 print(f"PermissionError: Unable to delete file {self.temp_filename}")
@@ -470,7 +511,6 @@ class ChatInterface(QWidget):
         chat_input_layout.addWidget(self.stop_tts_button)
 
         layout.addLayout(chat_input_layout)
-
         self.setLayout(layout)
 
     def add_message(self, sender, message, is_warning=False):
@@ -482,15 +522,23 @@ class ChatInterface(QWidget):
         widget = QLabel(message)
         widget.setWordWrap(True)
 
-        if is_warning:
-            bg_color = '#FF4136'  # Red background for warnings
+        bg_color = '#1E1E1E'  # Default background color
+        
+        item = QListWidgetItem()
+        if sender == 'DoccyReference':
+            widget = CollapsibleReferenceWidget(message)
         else:
-            if sender == 'User':
-                bg_color = '#005C4B'
-            elif sender == 'Doccy':
-                bg_color = '#6495ED'  # Blue background for Doccy
+            widget = QLabel(message)
+            widget.setWordWrap(True)
+            if is_warning:
+                bg_color = '#FF4136'  # Red background for warnings
             else:
-                bg_color = '#1E1E1E'
+                if sender == 'Doccy':
+                    bg_color = '#6495ED'
+                elif sender == 'User':
+                    bg_color = '#005C4B'
+                else:
+                    bg_color = '#1E1E1E'
 
         widget.setStyleSheet(f"""
             background-color: {bg_color};
@@ -572,10 +620,22 @@ class MainWindow(QMainWindow):
             error_message = f"An error occurred: {str(e)}. Please try again later or check your internet connection."
             self.chat_interface.add_message('Bot', error_message, is_warning=True)
 
+    def show_references_popup(self, references):
+        popup = ReferencesPopup(references)
+        popup.exec()
+    
     def on_response_ready(self, response, references):
         self.chat_interface.chat_list.takeItem(self.chat_interface.chat_list.count() - 1)
         self.chat_interface.add_message('Doccy', response)
-        self.chat_interface.add_message('DoccyReference', references)
+
+        # Add references as collapsible widget
+        references_widget = CollapsibleReferenceWidget(references)
+        references_widget.show_references_signal.connect(self.show_references_popup)
+
+        item = QListWidgetItem()
+        item.setSizeHint(references_widget.sizeHint())
+        self.chat_interface.chat_list.addItem(item)
+        self.chat_interface.chat_list.setItemWidget(item, references_widget)
 
         # Stop previous TTS if it's still running
         self.stop_tts()
