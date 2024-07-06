@@ -1,26 +1,41 @@
 {
-    "WCM M5-4.pdf": {
-        "checksum": "75a7eab8724ee4d33519debbf362811a"
+    "synchronization.pdf": {
+        "checksum": "32fbd04c782b89388f2733de47179007"
     },
-    "M 6 & 7.pdf": {
-        "checksum": "6eca19a61c7fd32358c1944f7e4152a5"
+    "Process.pptx": {
+        "checksum": "015748be3abd76c89e94aaadce5b67b9"
     },
-    "M2.pdf": {
-        "checksum": "2683124c89941f444a7648fd97a72e3e"
+    "Types of Operating System.pdf": {
+        "checksum": "1725a50ca4f8ab90ba673dff6cf4d042"
     },
-    "Statistical Tables.pdf": {
-        "checksum": "bb06e8dd0c1adce43e67d39d092aa5b2"
+    "CAT 1.docx": {
+        "checksum": "34d17ed6271e6fec9d473f80cbeea0c8"
     },
-    "M4 Cap Budgeting 2.pdf": {
-        "checksum": "9bf8b6e38d87782aaae256f1dd6bcb9b"
+    "cpu-scheduling.pptx": {
+        "checksum": "337db6b644deb3a7aede8b073785fdcd"
     },
-    "M 1  FM - 1.pdf": {
-        "checksum": "599a667db4a8051cbd7c1555df6416dd"
+    "system calls-components.pdf": {
+        "checksum": "900739d6ef4512c5b0499920b7ca4422"
     },
-    "CAPM-.pdf": {
-        "checksum": "06433c34db91d3d514bdaead94f218e9"
+    "page replacement.pdf": {
+        "checksum": "d19bb4a1663689e264674858f41c7758"
     },
-    "M 4 Cap Budgeting.pdf": {
-        "checksum": "72697a00732e2c947ce7fc574e4b6381"
+    "FAT.docx": {
+        "checksum": "20ad4aa2cd4209010ababe5de40a21c4"
+    },
+    "os_multi_threading.pdf": {
+        "checksum": "55915908f85fae4185e0c6a94fd69878"
+    },
+    "Deadlock.pdf": {
+        "checksum": "e1bc9bf1ec49252be2ead3791533bc96"
+    },
+    "dynamic memory tech.pdf": {
+        "checksum": "42f8e54094c58587a263f075cc2b02a8"
+    },
+    "Process-experiment.pdf": {
+        "checksum": "5ede3acf043fd529eb1a348bc91b84da"
+    },
+    "DISK SCHEDULING ALGORITHMS.pdf": {
+        "checksum": "092a165990f13a62a623665c76ae3750"
     }
 }

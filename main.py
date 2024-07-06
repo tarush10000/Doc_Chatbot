@@ -1,6 +1,6 @@
 import sys
 import os
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QScrollBar,
                             QLineEdit, QPushButton, QListWidget, QListWidgetItem, QLabel)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QTextCursor
@@ -19,14 +19,11 @@ import tempfile
 import pygame
 import asyncio
 import shutil
-
-def resource_path(relative_path):
-    if hasattr(sys, '_MEIPASS'):
-        return os.path.join(sys._MEIPASS, relative_path)
-    return os.path.join(os.path.abspath("."), relative_path)
+import re
 
 class DocumentProcessor(QThread):
     finished = pyqtSignal(object)
+    warning = pyqtSignal(str)
 
     def __init__(self, documents_folder, embeddings_folder, cache_file):
         super().__init__()
@@ -36,49 +33,57 @@ class DocumentProcessor(QThread):
         self.model = SentenceTransformer('all-MiniLM-L6-v2')
 
     def run(self):
-        all_text = ""
-        metadata = self.load_metadata()
-        total_files = len([f for f in os.listdir(self.documents_folder) if f.endswith((".pdf", ".docx", ".pptx"))])
-        processed_files = 0
-        db = None
-        files_in_folder = set(os.listdir(self.documents_folder))
-        files_in_cache = set(metadata.keys())
+        try:
+            all_text = ""
+            metadata = self.load_metadata()
+            total_files = len([f for f in os.listdir(self.documents_folder) if f.endswith((".pdf", ".docx", ".pptx"))])
+            processed_files = 0
+            db = None
+            files_in_folder = set(os.listdir(self.documents_folder))
+            files_in_cache = set(metadata.keys())
 
-        if not files_in_cache.intersection(files_in_folder):
-            print("No files in the folder match the cache. Clearing cache and embeddings...")
-            self.clear_cache_and_embeddings()
-            metadata = {}
+            if not files_in_cache.intersection(files_in_folder):
+                print("No files in the folder match the cache. Clearing cache and embeddings...")
+                self.clear_cache_and_embeddings()
+                metadata = {}
 
-        for filename in files_in_folder:
-            if filename.endswith((".pdf", ".docx", ".pptx")):
-                processed_files += 1
-                print(f"Processing file {processed_files} of {total_files}: {filename}")
-                file_path = os.path.join(self.documents_folder, filename)
-                file_checksum = self.compute_md5(file_path)
+            for filename in files_in_folder:
+                if filename.endswith((".pdf", ".docx", ".pptx")):
+                    processed_files += 1
+                    print(f"Processing file {processed_files} of {total_files}: {filename}")
+                    file_path = os.path.join(self.documents_folder, filename)
+                    file_checksum = self.compute_md5(file_path)
 
-                if filename in metadata and metadata[filename]['checksum'] == file_checksum:
-                    print(f"Skipping {filename}, embeddings already exist.")
-                    continue
+                    if filename in metadata and metadata[filename]['checksum'] == file_checksum:
+                        print(f"Skipping {filename}, embeddings already exist.")
+                        continue
 
-                print(f"Processing {filename}...")
-                text = self.load_document(file_path)
-                all_text += text
+                    print(f"Processing {filename}...")
+                    try:
+                        text = self.load_document(file_path)
+                        all_text += text
 
-                chunked_text = self.split_text(text)
-                db = self.create_or_update_chroma_db(documents=chunked_text, filename=filename)
+                        chunked_text = self.split_text(text)
+                        db = self.create_or_update_chroma_db(documents=chunked_text, filename=filename)
 
-                metadata[filename] = {'checksum': file_checksum}
-                self.save_metadata(metadata)
-                print(f"Completed processing {filename}")
-                print(f"Progress: {processed_files}/{total_files} files")
+                        metadata[filename] = {'checksum': file_checksum}
+                        self.save_metadata(metadata)
+                        print(f"Completed processing {filename}")
+                    except Exception as e:
+                        warning_msg = f"Failed to process {filename}: {str(e)}"
+                        print(warning_msg)
+                        self.warning.emit(warning_msg)
+                    print(f"Progress: {processed_files}/{total_files} files")
 
-        print("All files processed. Embedding creation complete.")
-        
-        if db is None:
-            print("No new documents were processed. Using existing database.")
-            db = self.get_existing_db()
-        
-        self.finished.emit(db)
+            print("All files processed. Embedding creation complete.")
+            
+            if db is None:
+                print("No new documents were processed. Using existing database.")
+                db = self.get_existing_db()
+            
+            self.finished.emit(db)
+        except Exception as e:
+            print(f"Error processing documents: {e}")
 
     def clear_cache_and_embeddings(self):
         # Clear cache.json
@@ -254,10 +259,12 @@ class DocumentProcessor(QThread):
 class ChatBot(QThread):
     response_ready = pyqtSignal(str, str)
 
-    def __init__(self, db, query):
+    def __init__(self, db, query, full_history, summary_history):
         super().__init__()
         self.db = db
         self.query = query
+        self.full_history = full_history
+        self.summary_history = summary_history
 
     def run(self):
         relevant_passages = self.get_relevant_passages(self.query, self.db, n_results=10)
@@ -278,7 +285,7 @@ class ChatBot(QThread):
         if not answer.strip():
             answer = self.generate_answer(self.query)
 
-        references = "*References: " + ", ".join([f"{doc_name}" for doc_name in list(ranked_docs.keys())[:3]]) + "*"
+        references = "*References: " + ", ".join(list(ranked_docs.keys())[:3]) + "*"
         self.response_ready.emit(answer, references)
 
     def get_relevant_passages(self, query: str, db, n_results: int) -> List[str]:
@@ -302,11 +309,15 @@ class ChatBot(QThread):
 
     def make_rag_prompt(self, query: str, relevant_passages: List[str]) -> str:
         escaped = " ".join(relevant_passages).replace("'", "").replace('"', "").replace("\n", " ")
-        prompt = f"""You are a helpful and knowledgeable teacher who answers questions using text from the reference passages included below. 
-        Provide a clear and detailed explanation of the requested topic, making sure to include relevant examples and analogies where appropriate.
-        Focus on making the information understandable and engaging for the learner.
+        history_text = " ".join([f"{sender}: {msg}" for sender, msg in self.full_history])
+        summary_text = " ".join(self.summary_history)
+        prompt = f"""You are Doccy, a helpful and knowledgeable AI teacher with a charming personality who loves to solve students' doubts. 
+        Use the information from the reference passages included below to answer the student's question. 
+        Provide a clear, detailed, and to-the-point explanation of the requested topic, include relevant examples if the user asks for it.
         If the passage is irrelevant to the answer, you may ignore it.
         QUESTION: '{query}'
+        FULL HISTORY: '{history_text}'
+        SUMMARY HISTORY: '{summary_text}'
         PASSAGES: '{escaped}'
         ANSWER:
         """
@@ -332,39 +343,72 @@ class TextToSpeech(QThread):
     def __init__(self, text):
         super().__init__()
         self.text = text
+        self.is_playing = False
+        self.temp_filename = ""
+        self.mixer_initialized = False
+
+    def preprocess_text(self, text):
+        # Remove emojis and asterisks
+        text = re.sub(r'[^\w\s,]', '', text)  # Remove non-word characters except spaces and commas
+        text = re.sub(r'\*', '', text)        # Remove asterisks
+        return text
 
     def run(self):
         asyncio.run(self.tts_and_play())
 
     async def tts_and_play(self):
         with tempfile.NamedTemporaryFile(delete=False, suffix='.mp3') as temp_file:
-            temp_filename = temp_file.name
+            self.temp_filename = temp_file.name
         
-        communicate = edge_tts.Communicate(self.text)
-        await communicate.save(temp_filename)
+        communicate = edge_tts.Communicate(self.preprocess_text(self.text), "en-US-EmmaMultilingualNeural")
+        await communicate.save(self.temp_filename)
         
         try:
             pygame.mixer.init()
-            pygame.mixer.music.load(temp_filename)
+            self.mixer_initialized = True
+            pygame.mixer.music.load(self.temp_filename)
             pygame.mixer.music.play()
+            self.is_playing = True
             
-            while pygame.mixer.music.get_busy():
+            while pygame.mixer.music.get_busy() and self.is_playing:
                 pygame.time.Clock().tick(10)
             
-            pygame.mixer.quit()
+            if self.mixer_initialized:
+                pygame.mixer.quit()
+                self.mixer_initialized = False
         except pygame.error as e:
             print(f"Error playing audio: {e}")
         finally:
-            # Ensure the file is closed and deleted
-            if os.path.exists(temp_filename):
-                os.unlink(temp_filename)
+            self.cleanup()
         
         self.finished.emit()
+
+    def stop(self):
+        self.is_playing = False
+        if self.mixer_initialized:
+            try:
+                pygame.mixer.music.stop()
+            except pygame.error:
+                pass
+        self.cleanup()
+
+    def cleanup(self):
+        if self.temp_filename != "" and os.path.exists(self.temp_filename):
+            try:
+                if self.mixer_initialized:
+                    pygame.mixer.quit()
+                    self.mixer_initialized = False
+                os.unlink(self.temp_filename)
+            except PermissionError:
+                print(f"PermissionError: Unable to delete file {self.temp_filename}")
+            self.temp_filename = ""
 
 class ChatInterface(QWidget):
     def __init__(self):
         super().__init__()
         self.init_ui()
+        self.full_history = []  # To store full chat history
+        self.summary_history = []  # To store summarized chat history
 
     def init_ui(self):
         layout = QVBoxLayout()
@@ -379,6 +423,27 @@ class ChatInterface(QWidget):
             QListWidget::item {
                 border: none;
                 margin: 5px;
+            }
+            QScrollBar:vertical {
+                background-color: #121B22;
+                width: 12px;
+                margin: 16px 0 16px 0;
+                border: 1px solid #121B22;
+            }
+            QScrollBar::handle:vertical {
+                background-color: #888888;
+                min-height: 20px;
+                border-radius: 6px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background-color: #555555;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                border: none;
+                background: none;
+            }
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+                background: none;
             }
         """)
         layout.addWidget(self.chat_list)
@@ -397,14 +462,22 @@ class ChatInterface(QWidget):
         self.chat_input.setPlaceholderText("Type a message...")
         self.send_button = QPushButton('Send')
         self.send_button.setStyleSheet("background-color: #00A884; color: white;")
+        self.stop_tts_button = QPushButton('Stop TTS')
+        self.stop_tts_button.setStyleSheet("background-color: #FF4136; color: white;")
+        self.stop_tts_button.setEnabled(False)
         chat_input_layout.addWidget(self.chat_input)
         chat_input_layout.addWidget(self.send_button)
+        chat_input_layout.addWidget(self.stop_tts_button)
 
         layout.addLayout(chat_input_layout)
 
         self.setLayout(layout)
 
     def add_message(self, sender, message, is_warning=False):
+        self.full_history.append((sender, message))
+        summary = f"{sender}: {message}"
+        self.summary_history.append(summary)
+
         item = QListWidgetItem()
         widget = QLabel(message)
         widget.setWordWrap(True)
@@ -412,7 +485,12 @@ class ChatInterface(QWidget):
         if is_warning:
             bg_color = '#FF4136'  # Red background for warnings
         else:
-            bg_color = '#005C4B' if sender == 'User' else '#1E1E1E'
+            if sender == 'User':
+                bg_color = '#005C4B'
+            elif sender == 'Doccy':
+                bg_color = '#6495ED'  # Blue background for Doccy
+            else:
+                bg_color = '#1E1E1E'
 
         widget.setStyleSheet(f"""
             background-color: {bg_color};
@@ -423,7 +501,7 @@ class ChatInterface(QWidget):
         """)
         widget.adjustSize()
         size = widget.sizeHint()
-        size.setHeight(size.height() + 20)  # Add extra height to ensure text is not cut off
+        size.setHeight(size.height() + 5)  # Add extra height to ensure text is not cut off
         item.setSizeHint(size)
 
         self.chat_list.addItem(item)
@@ -442,9 +520,10 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.init_ui()
+        self.tts = None
 
     def init_ui(self):
-        self.setWindowTitle("Document Chatbot")
+        self.setWindowTitle("Doccy - Your Document Chatbot")
         self.setGeometry(100, 100, 800, 600)
         self.setStyleSheet("background-color: #121B22;")
 
@@ -460,6 +539,7 @@ class MainWindow(QMainWindow):
         # Initialize document processor
         self.doc_processor = DocumentProcessor("documents", "embeddings_cache", "cache.json")
         self.doc_processor.finished.connect(self.on_processing_finished)
+        self.doc_processor.warning.connect(self.show_warning)
         self.doc_processor.start()
 
     def on_processing_finished(self, db):
@@ -467,6 +547,10 @@ class MainWindow(QMainWindow):
         # Connect send button and chat input
         self.chat_interface.send_button.clicked.connect(self.send_message)
         self.chat_interface.chat_input.returnPressed.connect(self.send_message)
+        self.chat_interface.stop_tts_button.clicked.connect(self.stop_tts)
+
+    def show_warning(self, message):
+        self.chat_interface.add_message('System', message, is_warning=True)
 
     def send_message(self):
         user_message = self.chat_interface.chat_input.text()
@@ -480,7 +564,7 @@ class MainWindow(QMainWindow):
         QApplication.processEvents()
 
         try:
-            self.chatbot = ChatBot(self.db, user_message)
+            self.chatbot = ChatBot(self.db, user_message, self.chat_interface.full_history, self.chat_interface.summary_history)
             self.chatbot.response_ready.connect(self.on_response_ready)
             self.chatbot.start()
         except Exception as e:
@@ -490,12 +574,22 @@ class MainWindow(QMainWindow):
 
     def on_response_ready(self, response, references):
         self.chat_interface.chat_list.takeItem(self.chat_interface.chat_list.count() - 1)
-        self.chat_interface.add_message('Bot', response)
-        self.chat_interface.add_message('Bot', references)
+        self.chat_interface.add_message('Doccy', response)
+        self.chat_interface.add_message('DoccyReference', references)
 
-        # Start text-to-speech
+        # Stop previous TTS if it's still running
+        self.stop_tts()
+
+        # Start new text-to-speech
         self.tts = TextToSpeech(response)
         self.tts.start()
+        self.chat_interface.stop_tts_button.setEnabled(True)
+
+    def stop_tts(self):
+        if self.tts:
+            self.tts.stop()
+            self.tts = None
+        self.chat_interface.stop_tts_button.setEnabled(False)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
