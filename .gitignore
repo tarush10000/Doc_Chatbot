@@ -1,0 +1,4 @@
+documents/*
+!documents/
+embeddings_cache/*
+!embeddings_cache/
