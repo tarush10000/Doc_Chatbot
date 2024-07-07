@@ -1,4 +1,4 @@
-# Doc-Chatbot
+# Doccy
 
 This project is a chatbot application built with PyQt6 that processes documents (PDF, DOCX, PPTX), generates embeddings, and answers questions based on the content of those documents. It uses ChromaDB for storing embeddings, Google's Generative AI for generating responses, and edge-tts for text-to-speech functionality.
 
@@ -10,6 +10,11 @@ This project is a chatbot application built with PyQt6 that processes documents 
 - Ranks documents based on query relevance using a `CrossEncoder` model.
 - Generates answers using Google's Generative AI.
 - Reads responses aloud using text-to-speech (TTS).
+
+## Screenshots
+![image](https://github.com/tarush10000/Doc_Chatbot/assets/62472697/ac6b863a-0f39-4365-97b2-f75abce2f1d9)
+![image](https://github.com/tarush10000/Doc_Chatbot/assets/62472697/75e41077-d6d9-44b8-afe8-1894a73cab03)
+
 
 ## Prerequisites
 
@@ -49,9 +54,9 @@ This project is a chatbot application built with PyQt6 that processes documents 
 ## File Structure
 
 - `main.py`: The main application file.
-- `documents`folder : Stores the documents from where data has to be extracted.
-- `embeddings_cache` folder : Stores the embeddings of all the data from documents.
-- `cache.json`: Keeps a track of the files that have been embedded.
+- `documents/`: Stores the documents from where data has to be extracted.
+- `embeddings_cache/`: Stores the embeddings of all the data from documents.
+- `cache.json`: Keeps track of the files that have been embedded.
 - `requirements.txt`: Lists the required Python packages.
 - `README.md`: This file.
 
