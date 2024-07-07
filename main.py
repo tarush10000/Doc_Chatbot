@@ -487,6 +487,7 @@ class ChatInterface(QWidget):
                 background: none;
             }
         """)
+        self.chat_list.verticalScrollBar().setSingleStep(1)
         layout.addWidget(self.chat_list)
 
         # Input area
